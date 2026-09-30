@@ -1,0 +1,36 @@
+# R36Ultra (720x720). Deliberately minimal: no bar, no borders, no gaps.
+output * bg #101010 solid_color
+default_border none
+default_floating_border none
+gaps inner 0
+gaps outer 0
+font pango:DejaVu Sans 10
+
+set $mod Mod1
+bindsym $mod+Return exec foot
+bindsym $mod+q kill
+bindsym $mod+Shift+e exit
+bindsym $mod+k exec /usr/local/bin/osk-toggle
+bindsym $mod+i exec foot --app-id=r36u-status r36u-status -f
+for_window [app_id="r36u-status"] fullscreen enable
+
+# The thin strip at the top: battery, LEDs and whichever buttons are held.
+# It takes 20 px from the window below rather than covering it.
+bar {
+	position top
+	height 20
+	workspace_buttons no
+	font pango:Terminus 9
+	pango_markup enabled
+	status_command /usr/local/bin/r36u-status
+	colors {
+		background #101010
+		statusline #c8c8c8
+	}
+}
+
+# The on-screen keyboard is up from the start; osk-toggle ($mod+k) hides it and
+# brings it back. Its layer-shell surface takes its space from the window below,
+# so the terminal shrinks instead of being covered.
+exec /usr/local/bin/wvkbd-mobintl -H 280 --fn "DejaVu Sans 14" 2>/tmp/wvkbd.log
+exec foot

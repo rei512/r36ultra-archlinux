@@ -1,0 +1,687 @@
+From 6bafe34f202093547a42365f2fe7d0967c74c7e4 Mon Sep 17 00:00:00 2001
+From: rei_512_ <me@deltav-lab.org>
+Date: Wed, 30 Sep 2026 15:02:55 +0900
+Subject: [PATCH 3/3] arm64: dts: rockchip: add the R36Ultra handheld
+
+rk3326-r36ultra.dts builds on rk3326-odroid-go.dtsi and applies the
+differences to the stock BSP device tree: RK817 regulators, io-domains,
+UART5 console, SD card, the ST7703 panel, RK915 WiFi on SDIO, the gamepad
+buttons and the battery. The WiFi MAC address is not in the device tree;
+userspace passes a per-device one to the rk915 driver.
+
+rk3326-r36ultra-nodisp.dts is the one used to boot. It disables VOP, DSI
+and the panel, and keeps the framebuffer U-Boot left on the panel through
+simple-framebuffer and a reserved memory region.
+---
+ arch/arm64/boot/dts/rockchip/Makefile         |   2 +
+ .../dts/rockchip/rk3326-r36ultra-nodisp.dts   |  84 +++
+ .../boot/dts/rockchip/rk3326-r36ultra.dts     | 553 ++++++++++++++++++
+ 3 files changed, 639 insertions(+)
+ create mode 100644 arch/arm64/boot/dts/rockchip/rk3326-r36ultra-nodisp.dts
+ create mode 100644 arch/arm64/boot/dts/rockchip/rk3326-r36ultra.dts
+
+diff --git a/arch/arm64/boot/dts/rockchip/Makefile b/arch/arm64/boot/dts/rockchip/Makefile
+index dbdda9783..b774d9182 100644
+--- a/arch/arm64/boot/dts/rockchip/Makefile
++++ b/arch/arm64/boot/dts/rockchip/Makefile
+@@ -25,6 +25,8 @@ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-anbernic-rg351v.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-gameforce-chi.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-odroid-go2.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-odroid-go2-v11.dtb
++dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-r36ultra.dtb
++dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-r36ultra-nodisp.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3326-odroid-go3.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3328-a1.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3328-evb.dtb
+diff --git a/arch/arm64/boot/dts/rockchip/rk3326-r36ultra-nodisp.dts b/arch/arm64/boot/dts/rockchip/rk3326-r36ultra-nodisp.dts
+new file mode 100644
+index 000000000..ab25fd4ff
+--- /dev/null
++++ b/arch/arm64/boot/dts/rockchip/rk3326-r36ultra-nodisp.dts
+@@ -0,0 +1,84 @@
++// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
++/*
++ * Debug variant of rk3326-r36ultra.dts with the display pipeline disabled,
++ * to isolate whether the boot hang after "[drm] Initialized rockchip" comes
++ * from the display path.
++ */
++#include "rk3326-r36ultra.dts"
++
++&dsi {
++	status = "disabled";
++};
++
++&dsi_dphy {
++	status = "disabled";
++};
++
++&vopb {
++	status = "disabled";
++};
++
++&internal_display {
++	status = "disabled";
++};
++
++/*
++ * The VOP IOMMU shares aclk/hclk_vopb; its probe toggles them and would gate
++ * the clocks U-Boot left running (splash disappears, VOP/DSI registers become
++ * unreadable). Keep it off too so the bootloader display state survives.
++ */
++&vopb_mmu {
++	status = "disabled";
++};
++
++/*
++ * Bootloader display takeover (what the stock/ArkOS kernels do instead of
++ * re-initialising the panel). Keep the panel supply as U-Boot left it, as
++ * the BSP DT does (regulator-boot-on), so the fixed regulator does not drive
++ * gpio3 A3 low at probe.
++ */
++&vcc18_lcd_n {
++	regulator-boot-on;
++};
++
++/*
++ * U-Boot's framebuffer: VOP WIN1 base 0x3e07c000, 720x720 RGB888, stride 2160
++ * (VOP register dump). 720*720*3 = 0x17bb00, rounded up to 4 KiB. It sits
++ * inside the range the kernel otherwise picks for CMA, so reserve it.
++ */
++/ {
++	reserved-memory {
++		#address-cells = <2>;
++		#size-cells = <2>;
++		ranges;
++
++		uboot_fb: framebuffer@3e07c000 {
++			reg = <0x0 0x3e07c000 0x0 0x17c000>;
++			no-map;
++		};
++	};
++};
++
++/*
++ * Hand U-Boot's running display to simpledrm: it draws into U-Boot's
++ * framebuffer and keeps the clocks, power domain and panel supply that the
++ * bootloader left on, instead of re-initialising VOP/DSI/panel.
++ */
++/ {
++	chosen {
++		framebuffer {
++			compatible = "simple-framebuffer";
++			memory-region = <&uboot_fb>;
++			width = <720>;
++			height = <720>;
++			stride = <2160>;
++			format = "r8g8b8";
++			clocks = <&cru ACLK_VOPB>, <&cru HCLK_VOPB>,
++				 <&cru DCLK_VOPB>, <&cru PCLK_MIPI_DSI>,
++				 <&cru PCLK_MIPIDSIPHY>,
++				 <&pmucru SCLK_MIPIDSIPHY_REF>;
++			power-domains = <&power PX30_PD_VO>;
++			panel-supply = <&vcc18_lcd_n>;
++		};
++	};
++};
+diff --git a/arch/arm64/boot/dts/rockchip/rk3326-r36ultra.dts b/arch/arm64/boot/dts/rockchip/rk3326-r36ultra.dts
+new file mode 100644
+index 000000000..50a10fc32
+--- /dev/null
++++ b/arch/arm64/boot/dts/rockchip/rk3326-r36ultra.dts
+@@ -0,0 +1,553 @@
++// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
++/*
++ * Device tree for R36Ultra handheld game console (RK3326)
++ * Based on rk3326-odroid-go.dtsi
++ */
++
++/dts-v1/;
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/pinctrl/rockchip.h>
++#include "rk3326-odroid-go.dtsi"
++
++/ {
++	model = "R36Ultra";
++	compatible = "rgameconsole,r36ultra", "rockchip,rk3326";
++
++	/*
++	 * Panel power: GPIO-controlled fixed 1.8V regulator.
++	 * gpio3 RK_PA3 (active-high) enables the panel IOVCC.
++	 */
++	vcc18_lcd_n: regulator-vcc18-lcd {
++		compatible = "regulator-fixed";
++		regulator-name = "vcc18_lcd_n";
++		/*
++		 * Deliberately NOT regulator-boot-on (the BSP has it): the BSP kernel
++		 * takes over U-Boot's running display without touching the panel,
++		 * mainline re-initialises it. Re-initialising a panel that is still
++		 * streaming video left it black until a power cycle (a reset pulse
++		 * was not enough). Without boot-on the fixed regulator drives the
++		 * GPIO low at probe, so the panel is power-cycled before the panel
++		 * driver's prepare() - a clean start every boot.
++		 */
++		gpio = <&gpio3 RK_PA3 GPIO_ACTIVE_HIGH>;
++		enable-active-high;
++	};
++
++	/*
++	 * WiFi (RK915) power enable. The BSP drives it from rfkill-wlan
++	 * (wireless-wlan: WIFI,poweren_gpio = gpio0 RK_PA2, active-high); in
++	 * mainline the MMC core drives it through mmc-pwrseq-simple, so the
++	 * card is powered before the SDIO bus is scanned.
++	 */
++	sdio_pwrseq: sdio-pwrseq {
++		compatible = "mmc-pwrseq-simple";
++		pinctrl-names = "default";
++		pinctrl-0 = <&wifi_enable_h>;
++		post-power-on-delay-ms = <100>;
++		reset-gpios = <&gpio0 RK_PA2 GPIO_ACTIVE_LOW>;
++	};
++};
++
++/*
++ * Override the panel node defined in rk3326-odroid-go.dtsi.
++ * rgameconsole,r36ultra-panel carries the BSP init sequence and timing
++ * (see panel-sitronix-st7703.c). Reset GPIO: gpio3 RK_PD3 (active-low) per
++ * BSP DTS.
++ */
++&internal_display {
++	compatible = "rgameconsole,r36ultra-panel";
++	iovcc-supply = <&vcc18_lcd_n>;
++	vcc-supply = <&vcc18_lcd_n>;
++	reset-gpios = <&gpio3 RK_PD3 GPIO_ACTIVE_LOW>;
++};
++
++/*
++ * Debug UART. The physical serial port on this board is UART5 (0xff178000),
++ * per the BSP fiq-debugger (rockchip,serial-id = <5>) and U-Boot's
++ * "PreSerial: 5, raw, 0xff178000". rk3326-odroid-go.dtsi only enables
++ * uart1/uart2, so enable uart5 here.
++ *
++ * Override pinctrl-0 to uart5_xfer alone: the default in px30.dtsi also
++ * includes uart5_cts, which muxes gpio3 RK_PA3 - the pin this board uses
++ * for panel power (vcc18_lcd_n above).
++ */
++&uart5 {
++	/*
++	 * Debug UART (the BSP drives it with fiq-debugger at 1.5 Mbaud; here the
++	 * 8250 driver provides ttyS0). Only the xfer pins: uart5_cts would mux
++	 * gpio3 RK_PA3, which this board uses for panel power (vcc18_lcd_n).
++	 */
++	pinctrl-names = "default";
++	pinctrl-0 = <&uart5_xfer>;
++	status = "okay";
++};
++
++/*
++ * RK817 regulator constraints corrected for this board.
++ *
++ * rk3326-odroid-go.dtsi describes ODROID-Go's rail assignments. Several
++ * RK817 outputs are used differently here, so the kernel was rewriting
++ * them at PMIC probe - notably raising vcc_3v0 (SoC I/O) and vcc3v0_pmu
++ * (always-on domain) from 3.0 V to 3.3 V - and the board died ~1.3 s into
++ * boot. Values below are taken from the stock BSP device tree
++ * (dts_decompiled/r36u_stock.dts), which boots on this hardware.
++ *
++ * Still unmatched vs the BSP, left alone for now: LDO_REG1 (vcc_1v0),
++ * LDO_REG9 (vdd1v5_dvp) and OTG_SWITCH are not described by the DTSI, so
++ * the kernel does not touch them; regulator-initial-mode is not set here.
++ */
++&vdd_logic {
++	regulator-max-microvolt = <1350000>;
++};
++
++&vcc_3v3 {
++	regulator-name = "vcc_3v0";
++	regulator-min-microvolt = <3000000>;
++	regulator-max-microvolt = <3000000>;
++};
++
++&vcc3v3_pmu {
++	regulator-name = "vcc3v0_pmu";
++	regulator-min-microvolt = <3000000>;
++	regulator-max-microvolt = <3000000>;
++};
++
++/* LDO_REG7: camera (DVP) rail on this board, not backlight power */
++&vcc_bl {
++	regulator-name = "vcc2v8_dvp";
++	regulator-min-microvolt = <1800000>;
++	regulator-max-microvolt = <3300000>;
++};
++
++/* LDO_REG8: camera (DVP) rail on this board, not panel power */
++&vcc_lcd {
++	regulator-name = "vcc1v8_dvp";
++	regulator-min-microvolt = <3300000>;
++	regulator-max-microvolt = <3300000>;
++};
++
++&usb_midu {
++	regulator-min-microvolt = <4700000>;
++};
++
++/*
++ * I/O voltage domains. These registers tell the SoC what voltage each I/O
++ * bank runs at; a wrong value corrupts the signals on that bank.
++ *
++ * The stock BSP device tree describes vccio3 as vcc1v8_soc - a fixed 1.8 V
++ * rail - while rk3326-odroid-go.dtsi declares 3.3 V for it.
++ *
++ * Still different from the BSP, left alone for now because the rail voltage
++ * is not unambiguous: vccio1 (BSP: vcc2v8_dvp) and vccio6 (not described by
++ * the BSP at all).
++ */
++&io_domains {
++	/* BSP: vccio1 = vcc2v8_dvp (LDO_REG7, labelled vcc_bl here) */
++	vccio1-supply = <&vcc_bl>;
++	/* BSP: vccio3 = vcc1v8_soc (LDO_REG2) - 1.8 V, not 3.3 V */
++	vccio3-supply = <&vcc_1v8>;
++	/* The BSP does not describe vccio6 at all, so leave that bank alone */
++	/delete-property/ vccio6-supply;
++};
++
++/*
++ * Peripherals that exist on ODROID-Go but not on this board. The BSP keeps
++ * them disabled; rk3326-odroid-go.dtsi enables them, and their pinctrl
++ * then re-muxes pins this board uses for other things:
++ *   uart2 -> gpio2 B4/B6: B6 is a gamepad button input on this board
++ *   pwm3  -> gpio0 C1:    charger LED here
++ *   sfc   -> gpio1 A0/A1/A4/B1: eMMC clock and data lines here
++ */
++&uart2 {
++	status = "disabled";
++};
++
++&pwm3 {
++	status = "disabled";
++};
++
++&sfc {
++	status = "disabled";
++};
++
++/* BSP limits the SD card clock to 100 MHz; the DTSI allows 150 MHz. */
++&sdmmc {
++	max-frequency = <100000000>;
++};
++
++/* BSP: LDO_REG7/8/9 are always-on + boot-on; the DTSI leaves them switchable */
++&vcc_bl {
++	regulator-always-on;
++	regulator-boot-on;
++};
++
++&vcc_lcd {
++	regulator-always-on;
++	regulator-boot-on;
++};
++
++&rk817 {
++	/*
++	 * BSP: rockchip,system-power-controller. Without it the kernel has no
++	 * power-off handler for the RK817, so "poweroff" ends in "reboot: Power
++	 * down" with the board still powered and the button has to be held.
++	 * The same property also registers the RK817 restart handler.
++	 */
++	system-power-controller;
++
++	regulators {
++		LDO_REG9 {
++			regulator-name = "vdd1v5_dvp";
++			regulator-min-microvolt = <1500000>;
++			regulator-max-microvolt = <1500000>;
++			regulator-always-on;
++			regulator-boot-on;
++
++			regulator-state-mem {
++				regulator-off-in-suspend;
++				regulator-suspend-microvolt = <1500000>;
++			};
++		};
++	};
++};
++
++/* ODROID-Go input/LED wiring does not exist on this board (BSP: gamepad node) */
++&builtin_gamepad {
++	status = "disabled";
++};
++
++&gpio_led {
++	status = "disabled";
++};
++
++&pwm_led {
++	status = "disabled";
++};
++
++/*
++ * Gamepad buttons. The BSP drives them from its out-of-tree "micro,gamepad"
++ * driver: 18 active-low GPIOs with pull-up (key-gpios, gpio-key-pin), listed
++ * here in the BSP order. The BSP DT does not say which GPIO is which button
++ * (that mapping lives in the driver); the mapping below was identified on the
++ * device by pressing each button. Codes follow
++ * Documentation/input/gamepad.rst: the face buttons by physical position
++ * (A right, B bottom, X top, Y left on this board), FN as BTN_MODE.
++ * The 16th BSP key-gpio (gpio3 B7) produced no event from any button, so it
++ * is not described as a key (its pin keeps the BSP pull-up).
++ * The BSP debounce-interval (100) belongs to that driver; gpio-keys keeps its
++ * 5 ms default. Volume keys (SARADC, adc-keys) and the analog sticks
++ * (SARADC ch0-3) are not here.
++ */
++/ {
++	gamepad_keys: gpio-keys-gamepad {
++		compatible = "gpio-keys";
++		pinctrl-names = "default";
++		pinctrl-0 = <&gamepad_btn_pins>;
++
++		button-r1 {
++			gpios = <&gpio3 RK_PB3 GPIO_ACTIVE_LOW>;
++			label = "R1";
++			linux,code = <BTN_TR>;
++		};
++		button-r2 {
++			gpios = <&gpio3 RK_PB4 GPIO_ACTIVE_LOW>;
++			label = "R2";
++			linux,code = <BTN_TR2>;
++		};
++		button-l1 {
++			gpios = <&gpio3 RK_PB5 GPIO_ACTIVE_LOW>;
++			label = "L1";
++			linux,code = <BTN_TL>;
++		};
++		button-l2 {
++			gpios = <&gpio3 RK_PB6 GPIO_ACTIVE_LOW>;
++			label = "L2";
++			linux,code = <BTN_TL2>;
++		};
++		button-a {
++			gpios = <&gpio3 RK_PC0 GPIO_ACTIVE_LOW>;
++			label = "A";
++			linux,code = <BTN_EAST>;
++		};
++		button-b {
++			gpios = <&gpio3 RK_PC1 GPIO_ACTIVE_LOW>;
++			label = "B";
++			linux,code = <BTN_SOUTH>;
++		};
++		button-x {
++			gpios = <&gpio3 RK_PC2 GPIO_ACTIVE_LOW>;
++			label = "X";
++			linux,code = <BTN_NORTH>;
++		};
++		button-y {
++			gpios = <&gpio3 RK_PC3 GPIO_ACTIVE_LOW>;
++			label = "Y";
++			linux,code = <BTN_WEST>;
++		};
++		button-dpad-left {
++			gpios = <&gpio3 RK_PC4 GPIO_ACTIVE_LOW>;
++			label = "DPAD-LEFT";
++			linux,code = <BTN_DPAD_LEFT>;
++		};
++		button-dpad-right {
++			gpios = <&gpio3 RK_PC5 GPIO_ACTIVE_LOW>;
++			label = "DPAD-RIGHT";
++			linux,code = <BTN_DPAD_RIGHT>;
++		};
++		button-dpad-up {
++			gpios = <&gpio3 RK_PC6 GPIO_ACTIVE_LOW>;
++			label = "DPAD-UP";
++			linux,code = <BTN_DPAD_UP>;
++		};
++		button-dpad-down {
++			gpios = <&gpio3 RK_PC7 GPIO_ACTIVE_LOW>;
++			label = "DPAD-DOWN";
++			linux,code = <BTN_DPAD_DOWN>;
++		};
++		button-select {
++			gpios = <&gpio3 RK_PD0 GPIO_ACTIVE_LOW>;
++			label = "SELECT";
++			linux,code = <BTN_SELECT>;
++		};
++		button-start {
++			gpios = <&gpio3 RK_PD1 GPIO_ACTIVE_LOW>;
++			label = "START";
++			linux,code = <BTN_START>;
++		};
++		button-fn {
++			gpios = <&gpio3 RK_PB2 GPIO_ACTIVE_LOW>;
++			label = "FN";
++			linux,code = <BTN_MODE>;
++		};
++		button-thumbl {
++			gpios = <&gpio2 RK_PB5 GPIO_ACTIVE_LOW>;
++			label = "L3";
++			linux,code = <BTN_THUMBL>;
++		};
++		button-thumbr {
++			gpios = <&gpio2 RK_PB6 GPIO_ACTIVE_LOW>;
++			label = "R3";
++			linux,code = <BTN_THUMBR>;
++		};
++	};
++
++	/*
++	 * Volume keys: a resistor ladder on SARADC channel 2, as in the BSP's
++	 * adc-keys node. Measured on the device: 1020/1023 idle, 168 with volume
++	 * down and 0 with volume up, which matches the BSP thresholds (295 mV
++	 * and 15 mV against a 1.8 V reference). Channel 2 carries nothing else -
++	 * the analog sticks are all multiplexed onto channel 1 (see below).
++	 */
++	adc-keys {
++		compatible = "adc-keys";
++		io-channels = <&saradc 2>;
++		io-channel-names = "buttons";
++		keyup-threshold-microvolt = <1800000>;
++		poll-interval = <100>;
++
++		button-vol-up {
++			label = "VOLUME-UP";
++			linux,code = <KEY_VOLUMEUP>;
++			press-threshold-microvolt = <15000>;
++		};
++
++		button-vol-down {
++			label = "VOLUME-DOWN";
++			linux,code = <KEY_VOLUMEDOWN>;
++			press-threshold-microvolt = <295000>;
++		};
++	};
++
++	/*
++	 * The single RGB LED. The BSP drives it from its gamepad node
++	 * (red/green/blue-gpio, active-high); mainline has gpio-leds for that.
++	 * gpio2 A0-A2 are otherwise only used by the Ethernet and camera pin
++	 * groups, neither of which this board enables.
++	 */
++	leds {
++		compatible = "gpio-leds";
++		pinctrl-names = "default";
++		pinctrl-0 = <&rgb_led_pins>;
++
++		led-0 {
++			color = <LED_COLOR_ID_RED>;
++			function = LED_FUNCTION_STATUS;
++			gpios = <&gpio2 RK_PA2 GPIO_ACTIVE_HIGH>;
++		};
++
++		led-1 {
++			color = <LED_COLOR_ID_GREEN>;
++			function = LED_FUNCTION_STATUS;
++			gpios = <&gpio2 RK_PA1 GPIO_ACTIVE_HIGH>;
++		};
++
++		led-2 {
++			color = <LED_COLOR_ID_BLUE>;
++			function = LED_FUNCTION_STATUS;
++			gpios = <&gpio2 RK_PA0 GPIO_ACTIVE_HIGH>;
++		};
++	};
++
++	/*
++	 * Battery, with the values from the BSP DT (rk817,battery and
++	 * rk817,charger): 2832 mAh, charge at 500 mA to 4.2 V, terminate at
++	 * 300 mA, 150 mOhm internal resistance, and the BSP's 21-point OCV
++	 * table (3500 mV empty ... 4180 mV full, converted to microvolts and
++	 * 5 % steps). rk3326-odroid-go.dtsi already describes the charger
++	 * itself, but without a battery its driver refuses to probe.
++	 */
++	r36u_battery: battery {
++		compatible = "simple-battery";
++		charge-full-design-microamp-hours = <2832000>;
++		charge-term-current-microamp = <300000>;
++		constant-charge-current-max-microamp = <500000>;
++		constant-charge-voltage-max-microvolt = <4200000>;
++		factory-internal-resistance-micro-ohms = <150000>;
++		voltage-max-design-microvolt = <4180000>;
++		voltage-min-design-microvolt = <3500000>;
++		ocv-capacity-celsius = <20>;
++		ocv-capacity-table-0 =
++			<4180000 100>, <4069000 95>, <4001000 90>,
++			<3946000 85>, <3897000 80>, <3853000 75>,
++			<3812000 70>, <3776000 65>, <3743000 60>,
++			<3714000 55>, <3689000 50>, <3657000 45>,
++			<3630000 40>, <3615000 35>, <3602000 30>,
++			<3592000 25>, <3580000 20>, <3565000 15>,
++			<3546000 10>, <3521000 5>, <3500000 0>;
++	};
++};
++
++/* The sense resistor and sleep currents in the DTSI already match the BSP. */
++&rk817_charger {
++	monitored-battery = <&r36u_battery>;
++};
++
++/* BSP: 256 linear levels, default 200 */
++&backlight {
++	brightness-levels = <0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95 96 97 98 99 100 101 102 103 104 105 106 107 108 109 110 111 112 113 114 115 116 117 118 119 120 121 122 123 124 125 126 127 128 129 130 131 132 133 134 135 136 137 138 139 140 141 142 143 144 145 146 147 148 149 150 151 152 153 154 155 156 157 158 159 160 161 162 163 164 165 166 167 168 169 170 171 172 173 174 175 176 177 178 179 180 181 182 183 184 185 186 187 188 189 190 191 192 193 194 195 196 197 198 199 200 201 202 203 204 205 206 207 208 209 210 211 212 213 214 215 216 217 218 219 220 221 222 223 224 225 226 227 228 229 230 231 232 233 234 235 236 237 238 239 240 241 242 243 244 245 246 247 248 249 250 251 252 253 254 255>;
++	default-brightness-level = <200>;
++};
++
++/*
++ * PMIC sleep-state settings. The regulator core writes these into the RK817
++ * SLEEP registers at probe time, and they persist across SoC resets and
++ * software power-off. rk3326-odroid-go.dtsi carries ODROID-Go's values;
++ * align them with the stock BSP.
++ */
++&vcc_3v3 {
++	regulator-state-mem {
++		regulator-suspend-microvolt = <3000000>;	/* BSP: vcc_3v0 */
++	};
++};
++
++&vcc3v3_pmu {
++	regulator-state-mem {
++		regulator-suspend-microvolt = <3000000>;	/* BSP: vcc3v0_pmu */
++	};
++};
++
++&vcc_bl {
++	regulator-state-mem {
++		/delete-property/ regulator-off-in-suspend;
++		regulator-on-in-suspend;			/* BSP: LDO_REG7 stays on */
++		regulator-suspend-microvolt = <3300000>;
++	};
++};
++
++&vcc_lcd {
++	regulator-state-mem {
++		/delete-property/ regulator-off-in-suspend;
++		regulator-on-in-suspend;			/* BSP: LDO_REG8 stays on */
++		regulator-suspend-microvolt = <3300000>;
++	};
++};
++
++/*
++ * WiFi: RK915 on the SDIO controller (mmc@ff380000). The BSP enables this
++ * controller with a 50 MHz limit; the out-of-tree rk915 driver
++ * (rk915/, mainline port) binds to the function-1 node below.
++ *
++ * Host-wake: the BSP driver takes its interrupt from rockchip_wifi_get_oob_irq(),
++ * which returns the GPIO of WIFI,host_wake_irq = gpio0 RK_PA1 (active-high)
++ * on this board. The upstream DT example uses RK_PA5, which is another
++ * board's wiring. The driver moves RX on this interrupt (the chip does not
++ * signal in-band), so it must be the right pin. Level-high as in the port's
++ * example (the BSP requested a rising edge).
++ */
++&sdio {
++	#address-cells = <1>;
++	#size-cells = <0>;
++	cap-sd-highspeed;
++	cap-sdio-irq;
++	keep-power-in-suspend;
++	max-frequency = <50000000>;
++	mmc-pwrseq = <&sdio_pwrseq>;
++	no-mmc;
++	no-sd;
++	non-removable;
++	status = "okay";
++
++	wifi@1 {
++		compatible = "rockchip,rk915";
++		reg = <1>;
++		interrupt-parent = <&gpio0>;
++		interrupts = <RK_PA1 IRQ_TYPE_LEVEL_HIGH>;
++		interrupt-names = "host-wake";
++		pinctrl-names = "default";
++		pinctrl-0 = <&wifi_host_wake_h>;
++	};
++};
++
++&pinctrl {
++	btns {
++		/*
++		 * BSP: buttons/gpio-key-pin, all GPIO function with pull-up.
++		 * gpio3 B7 has no button found, but keeps the BSP setting.
++		 */
++		gamepad_btn_pins: gamepad-btn-pins {
++			rockchip,pins = <3 RK_PB3 RK_FUNC_GPIO &pcfg_pull_up>,
++					<3 RK_PB4 RK_FUNC_GPIO &pcfg_pull_up>,
++					<3 RK_PB5 RK_FUNC_GPIO &pcfg_pull_up>,
++					<3 RK_PB6 RK_FUNC_GPIO &pcfg_pull_up>,
++					<3 RK_PC0 RK_FUNC_GPIO &pcfg_pull_up>,
++					<3 RK_PC1 RK_FUNC_GPIO &pcfg_pull_up>,
++					<3 RK_PC2 RK_FUNC_GPIO &pcfg_pull_up>,
++					<3 RK_PC3 RK_FUNC_GPIO &pcfg_pull_up>,
++					<3 RK_PC4 RK_FUNC_GPIO &pcfg_pull_up>,
++					<3 RK_PC5 RK_FUNC_GPIO &pcfg_pull_up>,
++					<3 RK_PC6 RK_FUNC_GPIO &pcfg_pull_up>,
++					<3 RK_PC7 RK_FUNC_GPIO &pcfg_pull_up>,
++					<3 RK_PD0 RK_FUNC_GPIO &pcfg_pull_up>,
++					<3 RK_PD1 RK_FUNC_GPIO &pcfg_pull_up>,
++					<3 RK_PB2 RK_FUNC_GPIO &pcfg_pull_up>,
++					<3 RK_PB7 RK_FUNC_GPIO &pcfg_pull_up>,
++					<2 RK_PB5 RK_FUNC_GPIO &pcfg_pull_up>,
++					<2 RK_PB6 RK_FUNC_GPIO &pcfg_pull_up>;
++		};
++	};
++
++	leds {
++		/* BSP: red/green/blue-gpio of the gamepad node, driven high to light */
++		rgb_led_pins: rgb-led-pins {
++			rockchip,pins = <2 RK_PA0 RK_FUNC_GPIO &pcfg_pull_none>,
++					<2 RK_PA1 RK_FUNC_GPIO &pcfg_pull_none>,
++					<2 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>;
++		};
++	};
++
++	wifi {
++		/* BSP: sdio-pwrseq/wifi-enable-h, bias-disable */
++		wifi_enable_h: wifi-enable-h {
++			rockchip,pins = <0 RK_PA2 RK_FUNC_GPIO &pcfg_pull_none>;
++		};
++
++		/*
++		 * The BSP leaves this pin unconfigured. Pull-down as in the port's
++		 * example, so the level-high interrupt stays quiet while the chip
++		 * is powered off.
++		 */
++		wifi_host_wake_h: wifi-host-wake-h {
++			rockchip,pins = <0 RK_PA1 RK_FUNC_GPIO &pcfg_pull_down>;
++		};
++	};
++};
+-- 
+2.43.0
+

@@ -1,0 +1,9 @@
+[Unit]
+Description=R36Ultra analog sticks and pointer
+
+[Service]
+ExecStart=/usr/local/bin/r36u-joyd
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

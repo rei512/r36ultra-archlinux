@@ -1,0 +1,20 @@
+# Kernel work tree (its own git; publish kernel/patches instead)
+/kernel/linux-6.19/
+
+# Generated or downloaded: stage tars, sysroot, packages, rootfs tarball, images
+/build/
+
+# Vendor firmware and decompiled DTBs, for comparison only (not redistributable)
+/reference/
+
+# Local only: Claude's instructions (contain network details), personal tools,
+# notes and logs rescued from old sessions
+/CLAUDE.md
+/.claude/
+/local/
+
+# Windows metadata
+*:Zone.Identifier
+
+# Python bytecode
+__pycache__/

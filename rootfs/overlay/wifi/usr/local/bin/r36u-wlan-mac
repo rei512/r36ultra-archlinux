@@ -1,0 +1,16 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# Give the RK915 WiFi a MAC address of its own that stays the same on every
+# boot. The device tree has none, and without one the driver picks a random
+# address at every probe. The address is derived from /etc/machine-id, which
+# systemd creates once per installation, and handed to the driver as a module
+# option before udev loads it.
+set -euo pipefail
+id=$(</etc/machine-id)
+[[ $id =~ ^[0-9a-f]{32}$ ]] || { echo "r36u-wlan-mac: /etc/machine-id is not set" >&2; exit 1; }
+h=$(printf '%s rk915 wlan0' "$id" | sha256sum)
+# First octet: locally administered (bit 1 set), unicast (bit 0 clear).
+mac=$(printf '%02x:%s:%s:%s:%s:%s' $(( (0x${h:0:2} & 0xfe) | 0x02 )) \
+	"${h:2:2}" "${h:4:2}" "${h:6:2}" "${h:8:2}" "${h:10:2}")
+mkdir -p /run/modprobe.d
+echo "options rk915 macaddr=$mac" > /run/modprobe.d/r36u-wlan-mac.conf

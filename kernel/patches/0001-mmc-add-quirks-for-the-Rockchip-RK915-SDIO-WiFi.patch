@@ -1,0 +1,123 @@
+From 5bd4eedc969258b28fc124114e7c352cd33b9f50 Mon Sep 17 00:00:00 2001
+From: rei_512_ <me@deltav-lab.org>
+Date: Wed, 30 Sep 2026 15:02:28 +0900
+Subject: [PATCH 1/3] mmc: add quirks for the Rockchip RK915 SDIO WiFi
+
+Bind three card quirks to the "rockchip,rk915" function node, as needed
+by the out-of-tree rk915 driver on the R36Ultra handheld.
+---
+ drivers/mmc/core/quirks.h   |  5 +++++
+ drivers/mmc/core/sdio_cis.c |  9 +++++++--
+ drivers/mmc/host/dw_mmc.c   | 17 ++++++++++++++++-
+ include/linux/mmc/card.h    |  4 ++++
+ 4 files changed, 32 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/mmc/core/quirks.h b/drivers/mmc/core/quirks.h
+index c417ed34c..1234a0fe4 100644
+--- a/drivers/mmc/core/quirks.h
++++ b/drivers/mmc/core/quirks.h
+@@ -207,6 +207,11 @@ static const struct mmc_fixup __maybe_unused sdio_card_init_methods[] = {
+ 			      MMC_QUIRK_LENIENT_FN0 |
+ 			      MMC_QUIRK_BLKSZ_FOR_BYTE_MODE),
+ 
++	SDIO_FIXUP_COMPATIBLE("rockchip,rk915", add_quirk,
++			      MMC_QUIRK_BROKEN_SDIO_FUNCE |
++			      MMC_QUIRK_SDIO_CONT_CLOCK |
++			      MMC_QUIRK_SDIO_CMD52_WAIT_DATA),
++
+ 	END_FIXUP
+ };
+ 
+diff --git a/drivers/mmc/core/sdio_cis.c b/drivers/mmc/core/sdio_cis.c
+index afaa6cab1..cfbffa352 100644
+--- a/drivers/mmc/core/sdio_cis.c
++++ b/drivers/mmc/core/sdio_cis.c
+@@ -191,14 +191,19 @@ static int cistpl_funce_func(struct mmc_card *card, struct sdio_func *func,
+ 			mmc_hostname(card->host));
+ 		vsn = SDIO_SDIO_REV_1_00;
+ 	} else if (size < min_size) {
+-		return -EINVAL;
++		if (!(card->quirks & MMC_QUIRK_BROKEN_SDIO_FUNCE) || size < 14)
++			return -EINVAL;
++		pr_warn("%s: broken CISTPL_FUNCE, using SDIO 1.0 defaults\n",
++			mmc_hostname(card->host));
++		vsn = SDIO_SDIO_REV_1_00;
+ 	}
+ 
+ 	/* TPLFE_MAX_BLK_SIZE */
+ 	func->max_blksize = buf[12] | (buf[13] << 8);
+ 
+ 	/* TPLFE_ENABLE_TIMEOUT_VAL, present in ver 1.1 and above */
+-	if (vsn > SDIO_SDIO_REV_1_00)
++	if (vsn > SDIO_SDIO_REV_1_00 &&
++	    !(card->quirks & MMC_QUIRK_BROKEN_SDIO_FUNCE))
+ 		func->enable_timeout = (buf[28] | (buf[29] << 8)) * 10;
+ 	else
+ 		func->enable_timeout = jiffies_to_msecs(HZ);
+diff --git a/drivers/mmc/host/dw_mmc.c b/drivers/mmc/host/dw_mmc.c
+index 9e74b675e..260ce60b5 100644
+--- a/drivers/mmc/host/dw_mmc.c
++++ b/drivers/mmc/host/dw_mmc.c
+@@ -267,6 +267,11 @@ static u32 dw_mci_prepare_command(struct mmc_host *mmc, struct mmc_command *cmd)
+ 	else if (cmd->opcode != MMC_SEND_STATUS && cmd->data)
+ 		cmdr |= SDMMC_CMD_PRV_DAT_WAIT;
+ 
++	/* Some cards can't accept CMD52 while the DAT lines are busy */
++	if (cmd->opcode == SD_IO_RW_DIRECT && !(cmdr & SDMMC_CMD_STOP) &&
++	    mmc->card && (mmc->card->quirks & MMC_QUIRK_SDIO_CMD52_WAIT_DATA))
++		cmdr |= SDMMC_CMD_PRV_DAT_WAIT;
++
+ 	if (cmd->opcode == SD_SWITCH_VOLTAGE) {
+ 		u32 clk_en_a;
+ 
+@@ -1200,6 +1205,13 @@ static void dw_mci_submit_data(struct dw_mci *host, struct mmc_data *data)
+ 	}
+ }
+ 
++static bool dw_mci_card_needs_cont_clock(struct dw_mci_slot *slot)
++{
++	struct mmc_card *card = slot->mmc->card;
++
++	return card && (card->quirks & MMC_QUIRK_SDIO_CONT_CLOCK);
++}
++
+ static void dw_mci_setup_bus(struct dw_mci_slot *slot, bool force_clkinit)
+ {
+ 	struct dw_mci *host = slot->host;
+@@ -1263,7 +1275,8 @@ static void dw_mci_setup_bus(struct dw_mci_slot *slot, bool force_clkinit)
+ 
+ 		/* enable clock; only low power if no SDIO */
+ 		clk_en_a = SDMMC_CLKEN_ENABLE << slot->id;
+-		if (!test_bit(DW_MMC_CARD_NO_LOW_PWR, &slot->flags))
++		if (!test_bit(DW_MMC_CARD_NO_LOW_PWR, &slot->flags) &&
++		    !dw_mci_card_needs_cont_clock(slot))
+ 			clk_en_a |= SDMMC_CLKEN_LOW_PWR << slot->id;
+ 		mci_writel(host, CLKENA, clk_en_a);
+ 
+@@ -1666,6 +1679,8 @@ static void dw_mci_prepare_sdio_irq(struct dw_mci_slot *slot, bool prepare)
+ 		clk_en_a = clk_en_a_old & ~clken_low_pwr;
+ 	} else {
+ 		clear_bit(DW_MMC_CARD_NO_LOW_PWR, &slot->flags);
++		if (dw_mci_card_needs_cont_clock(slot))
++			return;
+ 		clk_en_a = clk_en_a_old | clken_low_pwr;
+ 	}
+ 
+diff --git a/include/linux/mmc/card.h b/include/linux/mmc/card.h
+index e9e964c20..ad811b6fe 100644
+--- a/include/linux/mmc/card.h
++++ b/include/linux/mmc/card.h
+@@ -329,6 +329,10 @@ struct mmc_card {
+ #define MMC_QUIRK_BROKEN_CACHE_FLUSH	(1<<16)	/* Don't flush cache until the write has occurred */
+ #define MMC_QUIRK_BROKEN_SD_POWEROFF_NOTIFY	(1<<17) /* Disable broken SD poweroff notify support */
+ #define MMC_QUIRK_NO_UHS_DDR50_TUNING	(1<<18) /* Disable DDR50 tuning */
++/* Bits 21-23 match the upstream rk915 quirks patch for 7.1 (19/20 are used there) */
++#define MMC_QUIRK_BROKEN_SDIO_FUNCE	(1<<21)	/* Tolerate short CISTPL_FUNCE, use default enable timeout */
++#define MMC_QUIRK_SDIO_CONT_CLOCK	(1<<22)	/* SDIO card requires a continuous clock */
++#define MMC_QUIRK_SDIO_CMD52_WAIT_DATA	(1<<23)	/* Card can't accept CMD52 while DAT lines are busy */
+ 
+ 	bool			written_flag;	/* Indicates eMMC has been written since power on */
+ 	bool			reenable_cmdq;	/* Re-enable Command Queue */
+-- 
+2.43.0
+

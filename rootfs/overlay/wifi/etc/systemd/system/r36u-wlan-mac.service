@@ -1,0 +1,12 @@
+[Unit]
+Description=Per-device MAC address for the RK915 WiFi
+DefaultDependencies=no
+Before=systemd-udevd.service systemd-udev-trigger.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/r36u-wlan-mac
+
+[Install]
+WantedBy=sysinit.target

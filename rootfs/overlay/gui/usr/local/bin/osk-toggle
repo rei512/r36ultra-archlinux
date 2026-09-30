@@ -1,0 +1,9 @@
+#!/bin/bash
+# SPDX-License-Identifier: MIT
+# SIGRTMIN, which wvkbd toggles on, is 34 with glibc; naming it is less portable
+# across shells than the number.
+pid=$(pidof wvkbd-mobintl) || {
+	echo "wvkbd is not running - see /tmp/wvkbd.log" >&2
+	exit 1
+}
+exec kill -34 $pid

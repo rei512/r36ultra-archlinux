@@ -1,0 +1,7 @@
+[submodule "userspace/wvkbd"]
+	path = userspace/wvkbd
+	url = https://github.com/jjsullivan5196/wvkbd.git
+[submodule "modules/rk915"]
+	path = modules/rk915
+	url = https://github.com/rei512/rk915.git
+	branch = main
