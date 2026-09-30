@@ -58,14 +58,23 @@ mcopy -i "$WORK/boot.img" "$KBOOT/Image" "$KBOOT/dts/rockchip/rk3326-r36ultra-no
 	"$TOP/boot/boot.ini" ::/
 mcopy -i "$WORK/boot.img" "$TOP/boot/extlinux.conf" ::/extlinux/
 
-# 3) The card: MBR, BOOT (FAT32, bootable) and rootfs (Linux).
+# 3) The card: MBR, BOOT (FAT32, bootable) and rootfs (Linux). The MBR is
+#    written directly: sfdisk hangs in WSL before it even opens the file.
 rm -f "$IMG" "$IMG.xz"
 truncate -s "${IMG_MIB}M" "$IMG"
-sfdisk -q "$IMG" <<EOF
-label: dos
-unit: sectors
-start=$BOOT_START, size=$BOOT_SECTORS, type=b, bootable
-start=$ROOT_START, size=$ROOT_SECTORS, type=83
+python3 - "$IMG" $BOOT_START $BOOT_SECTORS $ROOT_START $ROOT_SECTORS <<'EOF'
+import struct, sys
+img, boot_start, boot_n, root_start, root_n = sys.argv[1], *map(int, sys.argv[2:])
+def entry(active, ptype, start, count):
+    # CHS fields set to the "use LBA" value, as tools do for large disks
+    return struct.pack("<B3sB3sII", 0x80 if active else 0, b"\xfe\xff\xff",
+                       ptype, b"\xfe\xff\xff", start, count)
+mbr = bytearray(512)
+mbr[446:462] = entry(True, 0x0b, boot_start, boot_n)	# W95 FAT32
+mbr[462:478] = entry(False, 0x83, root_start, root_n)	# Linux
+mbr[510:512] = b"\x55\xaa"
+with open(img, "r+b") as f:
+    f.write(mbr)
 EOF
 dd if="$WORK/boot.img" of="$IMG" bs=$SECTOR seek=$BOOT_START conv=notrunc,sparse status=none
 dd if="$WORK/rootfs.img" of="$IMG" bs=4M seek=$((ROOT_START * SECTOR)) oflag=seek_bytes \
