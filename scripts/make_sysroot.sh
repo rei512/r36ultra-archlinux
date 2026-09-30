@@ -18,7 +18,15 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 
 # 1) What the card already has (glib2, libdbus, openssl ... and their headers).
-tar -xzf "$ROOTFS_TAR" -C "$OUT" ./usr/include ./usr/lib ./usr/share/pkgconfig
+#    Hard links in these directories can point outside them (2026-08 tarball:
+#    usr/lib/getconf/* -> usr/bin/getconf), and tar cannot create such a link
+#    unless the target is extracted too, so the targets are added.
+DIRS=(./usr/include ./usr/lib ./usr/share/pkgconfig)
+mapfile -t LINK_TARGETS < <(tar -tvzf "$ROOTFS_TAR" 2>/dev/null |
+	awk -F ' link to ' 'NF == 2 { n = split($1, f, " "); print f[n] "\t" $2 }' |
+	awk -F '\t' '$1 ~ /^\.\/usr\/(include|lib|share\/pkgconfig)\// &&
+		$2 !~ /^\.\/usr\/(include|lib|share\/pkgconfig)\// { print $2 }' | sort -u)
+tar -xzf "$ROOTFS_TAR" -C "$OUT" "${DIRS[@]}" "${LINK_TARGETS[@]}"
 
 # 2) What the overlay adds or replaces (wayland, pango, cairo, glibc 2.43 ...).
 PKG_EXCLUDE=(--exclude=.PKGINFO --exclude=.MTREE --exclude=.BUILDINFO --exclude=.INSTALL --exclude=.CHANGELOG)
