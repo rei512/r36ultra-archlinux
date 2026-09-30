@@ -1,0 +1,5 @@
+# Arch Linux ARM packages for the WiFi overlay (scripts/make_wifi_stage.sh)
+wpa_supplicant
+iw
+wireless-regdb
+pcsclite
