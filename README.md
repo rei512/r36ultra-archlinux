@@ -2,6 +2,8 @@
 
 R36Ultra（Rockchip RK3326）向けの非公式 Arch Linux ARM。カーネルは mainline Linux 6.19。
 
+<img src="docs/images/r36ultra.jpg" alt="R36Ultra で sway と画面キーボードが動いている様子" width="360">
+
 ## ログイン
 
 - ユーザー: `root`
