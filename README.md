@@ -23,7 +23,7 @@ R36Ultra（Rockchip RK3326）向けの非公式 Arch Linux ARM。カーネルは
 純正ファームウェアの U-Boot が eMMC に入った R36Ultra と、8GB 以上の SD カードが必要。eMMC には書き込まない。
 
 ```sh
-xz -dc r36ultra-archlinux.img.xz | sudo dd of=/dev/sdX bs=4M conv=fsync status=progress
+xz -dc r36ultra-archlinux-*.img.xz | sudo dd of=/dev/sdX bs=4M conv=fsync status=progress
 ```
 
 ログインは `root` / `root`。

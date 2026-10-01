@@ -28,11 +28,13 @@ scripts/make_image.sh         # SD カードのイメージを作る
 
 | 成果物 | 場所 |
 |---|---|
-| イメージ | `build/r36ultra-archlinux.img.xz`、`build/r36ultra-archlinux.img.xz.sha256` |
+| イメージ | `build/r36ultra-archlinux-<日付>.img.xz`、`build/r36ultra-archlinux-<日付>.img.xz.sha256` |
 | カーネル | `kernel/linux-6.19/arch/arm64/boot/Image` |
 | DTB | `kernel/linux-6.19/arch/arm64/boot/dts/rockchip/rk3326-r36ultra-nodisp.dtb` |
 | WiFi 一式 | `build/wifi_stage/wifi-rootfs.tar` |
 | GUI 一式 | `build/gui_stage/gui-rootfs.tar` |
+
+`<日付>` は作った日の `YYYY.MM.DD`。`RELEASE=2026.10.01 scripts/make_image.sh` のように指定もできる。Releases のタグは `v<日付>` にする。
 
 パッケージは Arch Linux ARM のミラーにある、その時点の最新版になる。
 

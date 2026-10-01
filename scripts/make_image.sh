@@ -1,6 +1,6 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT
-# Assemble the SD card image build/r36ultra-archlinux.img.xz without root:
+# Assemble the SD card image build/r36ultra-archlinux-YYYY.MM.DD.img.xz without root:
 # the rootfs is unpacked under fakeroot, which keeps the owners and modes, and
 # turned into an ext4 file system with mke2fs -d in the same fakeroot session;
 # the FAT boot partition is filled with mtools. Needs the kernel
@@ -12,7 +12,8 @@ B=$TOP/build
 KBOOT=$TOP/kernel/linux-6.19/arch/arm64/boot
 ROOTFS_TAR=$B/ArchLinuxARM-aarch64-latest.tar.gz
 WORK=$B/image
-IMG=$B/r36ultra-archlinux.img
+RELEASE=${RELEASE:-$(date +%Y.%m.%d)}	# the release tag is v$RELEASE
+IMG=$B/r36ultra-archlinux-$RELEASE.img
 
 SECTOR=512
 BOOT_START=2048			# 1 MiB

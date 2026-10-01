@@ -11,10 +11,16 @@
 
 ## SD カードへの書き込み
 
+Releases から `r36ultra-archlinux-<日付>.img.xz` と `.sha256` を取得し、照合する。
+
+```sh
+sha256sum -c r36ultra-archlinux-*.img.xz.sha256
+```
+
 `/dev/sdX` は SD カードのデバイスに置き換える。
 
 ```sh
-xz -dc r36ultra-archlinux.img.xz | sudo dd of=/dev/sdX bs=4M conv=fsync status=progress
+xz -dc r36ultra-archlinux-*.img.xz | sudo dd of=/dev/sdX bs=4M conv=fsync status=progress
 ```
 
 Windows では balenaEtcher や Rufus で書き込める。
