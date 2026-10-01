@@ -82,6 +82,7 @@ dd if="$WORK/rootfs.img" of="$IMG" bs=4M seek=$((ROOT_START * SECTOR)) oflag=see
 rm -rf "$WORK"
 
 xz -T0 -6 "$IMG"
-sha256sum "$IMG.xz" > "$IMG.xz.sha256"
+# Bare file name, so that `sha256sum -c` works wherever the two files are put.
+(cd "$B" && sha256sum "$(basename "$IMG").xz" > "$(basename "$IMG").xz.sha256")
 echo "image: $IMG.xz ($(du -h "$IMG.xz" | cut -f1))"
 cat "$IMG.xz.sha256"
